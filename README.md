@@ -1,4 +1,4 @@
-# GERD: Generated event response data generation
+# GERD: Geometric event response data generation
 
 [![](https://img.shields.io/badge/DOI-arXiv%3A1408.3644-B31B1B.svg)](https://arxiv.org/abs/2412.03259)
 [![](https://zenodo.org/badge/DOI/10.5281/zenodo.11063678.svg)](https://zenodo.org/records/11063678)
@@ -66,6 +66,7 @@ You can change this by providing additional parameters to the `ShapeDataset` cla
 * [Jens E. Pedersen](https://www.kth.se/profile/jeped) (@GitHub [jegp](https://github.com/jegp/)), doctoral student at KTH Royal Institute of Technology, Sweden.
 * [Dimitris Korakounis](https://www.kth.se/profile/dimkor), doctoral student at KTH Royal Institute of Technology, Sweden.
 * [Raghav Singhal](https://github.com/RaghavSinghal10), visiting student at KTH Royal Institute of Technology, Sweden.
+* [Jörg Conradt](http://neurocomputing.systems/), principal investigator
 
 The work has received funding from the EC Horizon 2020 Framework Programme under Grant Agreements 785907 and 945539.
 
