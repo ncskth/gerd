@@ -6,7 +6,7 @@ import re
 import torch
 
 
-class ShapeDataset(torch.utils.data.Dataset):
+class GerdDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         root: str,
@@ -25,7 +25,7 @@ class ShapeDataset(torch.utils.data.Dataset):
         self.files = []
         subdirs = Path(root).glob("*")
         for d in subdirs:
-            self.files.extend(ShapeDataset._get_subdir_files(d, train, shuffle_files))
+            self.files.extend(GerdDataset._get_subdir_files(d, train, shuffle_files))
         if file_filter:
             regex = re.compile(file_filter)
             self.files = [f for f in self.files if regex.search(str(f)) is not None]
@@ -80,7 +80,7 @@ class ShapeDataset(torch.utils.data.Dataset):
         return (
             self._stack_frames(warmup_tensor),
             self._stack_frames(actual_tensor),
-            offset_poses.squeeze()[self.stack - 1 :],
+            offset_poses[self.stack - 1 :],
         )
 
     def __len__(self):
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     parser.add_argument("--stack", type=int, default=None)
     args = parser.parse_args()
 
-    d = ShapeDataset(
+    d = GerdDataset(
         args.root, pose_delay=3, train=True, file_filter=args.filter, stack=args.stack
     )
     print(f"Found {len(d)} samples in {len(d.files)} files from root '{args.root}'")

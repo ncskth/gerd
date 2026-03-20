@@ -1,0 +1,37 @@
+# GERD dataset generation configuration
+# Usage: gerd N OUTPUT_DIR example.yaml
+
+# --- Required ---
+resolution: [300, 300]
+event_densities: [1.0]
+max_velocities: [0.1, 0.5, 1.0]
+
+# --- Optional (defaults shown) ---
+# length: 128
+# bg_density: 0.001
+# shape_density: 1.0
+# polarity: true
+# device: cuda
+# upsampling_factor: 8
+# upsampling_cutoff: 0.5
+
+# --- Transformations ---
+# Each section is optional; omitting it (or setting start: null) disables that transformation.
+# start:    "uniform" = random initial state | float = fixed value | null = disabled
+# velocity: 0.0 = static | "uniform" = random in [-max_velocity, max_velocity] | float = fixed rate
+
+translate:
+  start: uniform    # shapes always have a position; "uniform" samples randomly
+  velocity: uniform
+
+scale:
+  start: uniform
+  velocity: 0.0
+
+# rotate:
+#   start: uniform
+#   velocity: 0.0
+
+# shear:
+#   start: uniform
+#   velocity: 0.0
