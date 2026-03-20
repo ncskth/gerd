@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gerd"
 dynamic = ["version"]
+description = "Generate synthetic event-camera datasets for object tracking tasks"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
