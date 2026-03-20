@@ -13,5 +13,8 @@ dependencies = [
     "pyyaml",
 ]
 
+[project.optional-dependencies]
+test = ["torchvision"]
+
 [project.scripts]
 gerd = "gerd.__main__:cli"
