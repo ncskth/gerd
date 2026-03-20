@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gerd"
-version = "0.1.0"
+dynamic = ["version"]
 requires-python = ">=3.9"
 dependencies = [
     "ray",
@@ -12,6 +12,8 @@ dependencies = [
     "tqdm",
     "pyyaml",
 ]
+
+[tool.setuptools_scm]
 
 [project.optional-dependencies]
 test = ["torchvision"]
