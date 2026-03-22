@@ -147,7 +147,7 @@ class TCHead(nn.Module):
         """
         T, B, C, H, W = heatmaps.shape
         # Flatten spatial dimensions
-        heatmaps_flat = 10*heatmaps.view(T, B, C, H * W)
+        heatmaps_flat = heatmaps.view(T, B, C, H * W)
 
         # Softmax over spatial locations
         probs = torch.softmax(heatmaps_flat, dim=-1)  # (T, B, C, H*W)
@@ -197,6 +197,8 @@ class SPT_Net(nn.Module):
         self.bn3 = nn.BatchNorm2d(8 * 3)
         self.bn4 = nn.BatchNorm2d(8 * 3)
         self.bn5 = nn.BatchNorm2d(16 * 3)
+
+        # add regularization with gaussian blob and frame difference
 
 
 
@@ -268,3 +270,26 @@ class SPT_Net(nn.Module):
         # --- Head ---
         heatmaps, coords = self.tc_head(x, epoch=epoch)
         return heatmaps, coords
+    
+
+
+def make_gaussian_targets(y, W, H, sigma=2.0):
+    """
+    y: (T, B, C, 2)  -> (x, y) coords
+    returns: (T, B, C, W, H)
+    """
+    T, B, C, _ = y.shape
+    device = y.device
+
+    # Create coordinate grid
+    xs = torch.arange(W, device=device).view(1, 1, 1, W, 1)
+    ys = torch.arange(H, device=device).view(1, 1, 1, 1, H)
+
+    # Ground truth coords
+    x0 = y[..., 0].unsqueeze(-1).unsqueeze(-1)  # (T,B,C,1,1)
+    y0 = y[..., 1].unsqueeze(-1).unsqueeze(-1)
+
+    # Gaussian
+    g = torch.exp(-((xs - x0)**2 + (ys - y0)**2) / (2 * sigma**2))
+
+    return g
