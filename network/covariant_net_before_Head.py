@@ -184,24 +184,48 @@ class TCHead(nn.Module):
         # Apply temporal convolution
         x = self.temp_cov(x)
 
-        # Keep time constants separate through the detection head and fuse later.
+        # Aggregate across time constants
         T, B, C_total, H, W = x.shape
         C = C_total // self.num_TC
         x = x.view(T, B, self.num_TC, C, H, W)
-
-        scale_features = x.reshape(T * B * self.num_TC, C, H, W)
-
-        # Apply shared detection head independently to each time scale.
-        scale_heatmaps = self.head_square(scale_features)
-        scale_heatmaps = self.pool(scale_heatmaps)
-        _, _, H_out, W_out = scale_heatmaps.shape
-        scale_heatmaps = scale_heatmaps.view(T, B, self.num_TC, 1, H_out, W_out)
-
+        
         if curriculum_weights is not None:
-            curriculum_weights = curriculum_weights.to(scale_heatmaps.device)
-            heatmaps = (scale_heatmaps * curriculum_weights.view(1, 1, -1, 1, 1, 1)).sum(dim=2)
+            # Apply curriculum weighting instead of mean averaging
+            curriculum_weights = curriculum_weights.to(x.device)
+            x = (x * curriculum_weights.view(1, 1, -1, 1, 1, 1)).sum(dim=2)
         else:
-            heatmaps = torch.logsumexp(scale_heatmaps, dim=2)
+            # Default: max across time constants (scale-max pooling)
+            x = x.mean(dim=2)  # (T, B, C, H, W)
+            # x = x.max(dim=2).values  # (T, B, C, H, W)
+
+        # Reset LI states at the beginning of each datapoint
+        # for head in [self.head_square]:
+        # for head in [self.head_circle, self.head_triangle, self.head_square]:
+            # head[1].reset_state()  # Reset LI activation (index 1 in Sequential)
+        
+        # Process timestep by timestep to accumulate LI state
+        heatmaps_list = []
+        for t in range(T):
+            x_t = x[t]  # (B, C, H, W)
+            
+            # Apply three shape-specific heads
+            # h_circle = self.head_circle(x_t)      # (B, 1, H, W)
+            # h_triangle = self.head_triangle(x_t)  # (B, 1, H, W)
+            h_square = self.head_square(x_t)      # (B, 1, H, W)
+            
+            # Concatenate along channel dimension
+            # h_t = torch.cat([h_circle, h_triangle, h_square], dim=1)  # (B, 3, H, W)
+            h_t = h_square  # (B, 1, H, W)
+            heatmaps_list.append(h_t)
+        
+        # Stack timesteps back together
+        heatmaps = torch.stack(heatmaps_list, dim=0)  # (T, B, 1, H, W)
+        
+        # Reshape for pooling
+        heatmaps = heatmaps.view(T * B, 1, H, W)
+        heatmaps = self.pool(heatmaps)
+        _, _, H, W = heatmaps.shape
+        heatmaps = heatmaps.view(T, B, 1, H, W)
 
         # Extract coordinates from heatmaps via soft-argmax
         coords = self.soft_argmax_2d(heatmaps)

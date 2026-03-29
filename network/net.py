@@ -61,7 +61,7 @@ class SpatioTemporalConv2d(nn.Module):
         conv: nn.Conv2d,
         time_constants_num: int,
         middle_TC: float = 10.0,
-        TC_ratio: float = torch.sqrt(torch.tensor(2.0)),
+        TC_ratio: float = 2.0,
         expand: bool = False,
     ):
         super().__init__()
@@ -143,7 +143,7 @@ class TCHead(nn.Module):
         self.kernel_size = kernel_size
         # Shared temporal convolution
         self.head = nn.Conv2d(in_channels, 16, kernel_size=15, padding=15//2, bias=False)
-        self.temp_cov = SpatioTemporalConv2d(self.head, time_constants_num=5, middle_TC=10, expand=False)
+        self.temp_cov = SpatioTemporalConv2d(self.head, time_constants_num=1, middle_TC=10, expand=False)
         
         # THREE SEPARATE HEADS (one per shape) with two-layer architecture (64 → 32 → 1)
         # Circle head: optimized for smooth, symmetric features
@@ -184,24 +184,47 @@ class TCHead(nn.Module):
         # Apply temporal convolution
         x = self.temp_cov(x)
 
-        # Keep time constants separate through the detection head and fuse later.
+        # Aggregate across time constants
         T, B, C_total, H, W = x.shape
         C = C_total // self.num_TC
         x = x.view(T, B, self.num_TC, C, H, W)
-
-        scale_features = x.reshape(T * B * self.num_TC, C, H, W)
-
-        # Apply shared detection head independently to each time scale.
-        scale_heatmaps = self.head_square(scale_features)
-        scale_heatmaps = self.pool(scale_heatmaps)
-        _, _, H_out, W_out = scale_heatmaps.shape
-        scale_heatmaps = scale_heatmaps.view(T, B, self.num_TC, 1, H_out, W_out)
-
+        
         if curriculum_weights is not None:
-            curriculum_weights = curriculum_weights.to(scale_heatmaps.device)
-            heatmaps = (scale_heatmaps * curriculum_weights.view(1, 1, -1, 1, 1, 1)).sum(dim=2)
+            # Apply curriculum weighting instead of mean averaging
+            curriculum_weights = curriculum_weights.to(x.device)
+            x = (x * curriculum_weights.view(1, 1, -1, 1, 1, 1)).sum(dim=2)
         else:
-            heatmaps = torch.logsumexp(scale_heatmaps, dim=2)
+            # Default: average across time constants
+            x = x.mean(dim=2)  # (T, B, C, H, W)
+
+        # Reset LI states at the beginning of each datapoint
+        # for head in [self.head_circle, self.head_triangle, self.head_square]:
+        # for head in [self.head_square]:
+            # head[1].reset_state()  # Reset LI activation (index 1 in Sequential)
+        
+        # Process timestep by timestep to accumulate LI state
+        heatmaps_list = []
+        for t in range(T):
+            x_t = x[t]  # (B, C, H, W)
+            
+            # Apply three shape-specific heads
+            # h_circle = self.head_circle(x_t)      # (B, 1, H, W)
+            # h_triangle = self.head_triangle(x_t)  # (B, 1, H, W)
+            h_square = self.head_square(x_t)      # (B, 1, H, W)
+            
+            # Concatenate along channel dimension
+            # h_t = torch.cat([h_circle, h_triangle, h_square], dim=1)  # (B, 3, H, W)
+            h_t = h_square  # (B, 1, H, W)
+            heatmaps_list.append(h_t)
+        
+        # Stack timesteps back together
+        heatmaps = torch.stack(heatmaps_list, dim=0)  # (T, B, 1, H, W)
+        
+        # Reshape for pooling
+        heatmaps = heatmaps.view(T * B, 1, H, W)
+        heatmaps = self.pool(heatmaps)
+        _, _, H, W = heatmaps.shape
+        heatmaps = heatmaps.view(T, B, 1, H, W)
 
         # Extract coordinates from heatmaps via soft-argmax
         coords = self.soft_argmax_2d(heatmaps)
@@ -240,7 +263,7 @@ class TCHead(nn.Module):
         coords = torch.stack([x_coord, y_coord], dim=-1)
         return coords    
 
-class SPT_Net(nn.Module):
+class SPT_Net_NonCovariant(nn.Module):
     def __init__(self, warmup=10, curriculum=False, total_epochs=100, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.warmup = warmup
@@ -248,7 +271,7 @@ class SPT_Net(nn.Module):
         self.total_epochs = total_epochs
         
         kernel_size = 11
-        time_constants_num = 5
+        time_constants_num = 1
         scales = torch.tensor([1.0, 2.0, 4.0, 8.0])
         angles = torch.tensor([0.0, torch.pi/2])
         ratios = torch.tensor([0.5, 1])

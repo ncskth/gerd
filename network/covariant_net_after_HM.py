@@ -1,6 +1,7 @@
 from norse.torch import ParameterizedSpatialReceptiveField2d
 import torch
 import torch.nn as nn
+import math
 
 
 def generate_time_constants(num_tc, middle_tc, ratio):
@@ -136,11 +137,15 @@ class SpatioTemporalConv2d(nn.Module):
 
 
 class TCHead(nn.Module):
-    def __init__(self, in_channels, num_TC, kernel_size=11):
+    def __init__(self, in_channels, num_TC, kernel_size=11, prob_pooling="avg"):
         super().__init__()
         self.num_TC = num_TC
         self.in_channels = in_channels
         self.kernel_size = kernel_size
+        self.prob_pooling = prob_pooling
+
+        if self.prob_pooling not in {"avg", "logsumexp"}:
+            raise ValueError("prob_pooling must be one of {'avg', 'logsumexp'}")
         # Shared temporal convolution
         self.head = nn.Conv2d(in_channels, 16, kernel_size=15, padding=15//2, bias=False)
         self.temp_cov = SpatioTemporalConv2d(self.head, time_constants_num=5, middle_TC=10, expand=False)
@@ -197,11 +202,35 @@ class TCHead(nn.Module):
         _, _, H_out, W_out = scale_heatmaps.shape
         scale_heatmaps = scale_heatmaps.view(T, B, self.num_TC, 1, H_out, W_out)
 
+        # Convert each time-scale heatmap to a probability distribution over space.
+        scale_logits_flat = scale_heatmaps.view(T, B, self.num_TC, 1, H_out * W_out)
+        scale_probs_flat = torch.softmax(scale_logits_flat, dim=-1)
+        scale_log_probs_flat = torch.log(scale_probs_flat.clamp_min(1e-12))
+
         if curriculum_weights is not None:
-            curriculum_weights = curriculum_weights.to(scale_heatmaps.device)
-            heatmaps = (scale_heatmaps * curriculum_weights.view(1, 1, -1, 1, 1, 1)).sum(dim=2)
+            weights = curriculum_weights.to(scale_heatmaps.device)
+            weights = weights / weights.sum().clamp_min(1e-12)
         else:
-            heatmaps = torch.logsumexp(scale_heatmaps, dim=2)
+            weights = torch.full(
+                (self.num_TC,),
+                1.0 / self.num_TC,
+                device=scale_heatmaps.device,
+                dtype=scale_heatmaps.dtype,
+            )
+
+        if self.prob_pooling == "avg":
+            fused_probs_flat = (
+                scale_probs_flat * weights.view(1, 1, self.num_TC, 1, 1)
+            ).sum(dim=2)
+            fused_log_probs_flat = torch.log(fused_probs_flat.clamp_min(1e-12))
+        else:
+            fused_log_probs_flat = torch.logsumexp(
+                scale_log_probs_flat + weights.log().view(1, 1, self.num_TC, 1, 1),
+                dim=2,
+            )
+
+        # Return pooled log-probabilities as heatmaps (compatible with downstream softmax).
+        heatmaps = fused_log_probs_flat.view(T, B, 1, H_out, W_out)
 
         # Extract coordinates from heatmaps via soft-argmax
         coords = self.soft_argmax_2d(heatmaps)
@@ -241,7 +270,15 @@ class TCHead(nn.Module):
         return coords    
 
 class SPT_Net(nn.Module):
-    def __init__(self, warmup=10, curriculum=False, total_epochs=100, *args, **kwargs):
+    def __init__(
+        self,
+        warmup=10,
+        curriculum=False,
+        total_epochs=100,
+        prob_pooling="avg",
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.warmup = warmup
         self.curriculum = curriculum
@@ -276,7 +313,7 @@ class SPT_Net(nn.Module):
 
         self.temp_cov2 = SpatioTemporalConv2d(self.spt_conv2, time_constants_num=time_constants_num, middle_TC=10, expand=False)
 
-        self.tc_head = TCHead(weights2.shape[0], time_constants_num)
+        self.tc_head = TCHead(weights2.shape[0], time_constants_num, prob_pooling=prob_pooling)
         self.num_tc = time_constants_num
 
     def curriculum_tc_weights(self, epoch, num_tc):
